@@ -1,0 +1,150 @@
+---
+title: "OCN683_HW2"
+author: "ʻAʻaliʻi Kelling"
+date: "2025-01-24"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+##Background Information:
+Here we will analyze experimental data from Leibold et al. (2017), in which they used mesocosm
+manipulations to test whether grazers promote phytoplankton diversity in ponds. They factorially
+implemented a number of experimental treatments: N:P ratio, light, nutrient level, presence of
+grazers, and presence of a predator of the grazers. For the purposes of this assignment we will only
+use the balanced N:P treatment, and we will include both light levels but will not analyze the
+effect of light (the authors found it has no effect).
+
+The column NutrientLevel has two levels (L = low and H = high), and the column FoodWeb has
+three levels (A = algae, G = algae + grazers, P = algae + grazers + predator). The treatments were
+randomly assigned to mesocosms within four blocks (column Block). The response variable we
+will analyze is the column Phyto_Chao1, which is the Chao-1 estimator of taxonomic richness. 
+
+
+
+```{r}
+#load R packages
+library(dplyr)
+library(tidyr)
+library(tidyverse)
+library(car)
+library(janitor) #cleaning data function
+library(here) #enables easy file referencing 
+library(rstatix) #descriptive stats
+library(ggeffects) #effects plot
+library(ggplot2)
+library(emmeans)
+
+#Load data 
+data <- read_csv("leibold_mesocosm_data_subset_HW2.csv")
+head(data)
+
+str(data)
+
+data <- data %>%
+  mutate_at(vars(FoodWeb, Block, NutrientLevel), 
+            as.factor)
+
+str(data)
+```
+
+##Instructions:Create a linear model that tests whether richness is explained by nutrient level and/or food web treatment, and whether the effect of food web treatment differs between nutrient levels, while also accounting for the blocked structure of the experiment. 
+
+
+#Linear Model
+```{r}
+#linear model for richness 
+lm1 <- lm(Phyto_Chao1 ~ NutrientLevel * FoodWeb + Block, data = data)
+summary(lm1)
+
+par(mfrow = c(2, 2))
+plot(lm1)
+
+#ANOVA on lm
+aov_lm1 <- Anova(lm1)
+print(aov_lm1)
+
+plot(aov_lm1)
+```
+
+
+
+##Question: Why is it important to account for the blocks? Analyze the results of the linear model as we did in Homework 1. What is your interpretation of these results so far?
+
+It is important to account for blocks because they help control for unexplained spatial, temporal, or other variations in the data, thereby increasing the precision of the model. Including blocks also addresses the potential non-independence of residuals, ensuring that the assumptions of the linear model are met.Based on the results, both NutrientLevel (F = 7.2289, p = 0.0113) and FoodWeb (F = 7.0042, p = 0.0030) are significant factors affecting the taxonomic richness estimator. This indicates that variations in nutrient levels and food web treatments have a meaningful impact on richness.
+
+
+##Instructions: Now we will use contrasts to test some hypotheses, and we will imagine that we formulated these hypotheses a priori (as opposed to formulating them after we looked at the data). We would like to know specifically whether the grazer treatment (G) has greater richness than the algae treament (A), and whether the effect of grazers differs between high and low nutrient levels (we think the effect of grazers on coexistence may be greater at high nutrient loading). 
+
+##Use emmeans to calculate the estimated marginal means of each combination of nutrient level and food web treatment (i.e., H + A, H + G, H + P, L + A, L + G, L + P).
+
+```{r}
+trt.control.contrast <- emmeans(lm1, specs = trt.vs.ctrl ~ NutrientLevel * FoodWeb)
+trt.control.contrast
+
+```
+
+##(1) whether G is different from A in the H treatment
+##(2) whether G is different from A in the L treatment
+##(3) whether G is different from A when averaging over the L and H treatments
+##(4) define an interaction contrast that tests whether the difference between G and A is itself different between L and H treatments.
+```{r}
+
+#TABLE KEY
+#NutrientLevel FoodWeb emmean   SE df lower.CL upper.CL
+# H             A        10.05 2.01 30     5.94     14.2
+# L             A        12.44 1.73 30     8.91     16.0
+# H             G        16.16 1.73 30    12.63     19.7
+# L             G        19.26 2.05 30    15.07     23.5
+# H             P         9.65 2.06 30     5.44     13.9
+# L             P        17.23 2.26 30    12.61     21.8
+ 
+##(1) - (4)
+contrats_gah <- contrast(emmeans(trt.control.contrast, specs = ~ NutrientLevel * FoodWeb),
+         method = list("H: A - G" = c(-1, 0, 1, 0, 0, 0),
+                       "L: A - G" = c(0, -1, 0, 1, 0, 0),
+                       "AVG:A - G" = c(-0.5, -0.5, 0.5, 0.5, 0, 0),
+                       "Interaction Contrast" = c(-1, -1, 1, 1, 0, 0) ))
+
+contrats_gah
+
+```
+
+
+These results show that the presence of grazers (G) within both nutrient level groups (H and L) has a significant effect on plankton richness compared to the absence of grazers (A). Based on the estimates, grazers have a slightly greater influence on richness under low nutrient conditions (estimate = 6.82, p = 0.0164) compared to high nutrient conditions (estimate = 6.11, p = 0.0284), suggesting that their presence may play a crucial role under nutrient-limiting conditions. When comparing the averages across nutrient levels, grazers significantly increased richness, with an average of 6.47 units higher compared to areas with no grazers (p = 0.0017). The interaction contrast revealed a difference of 19.93 units, indicating that the effect of grazers on richness is nutrient-dependent, with a stronger effect under low nutrient conditions.
+
+
+
+
+
+##(1) whether G is different from P in the H treatment
+##(2) whether G is different from P in the L treatment
+##(3) whether G is different from P when averaging over the L and H treatments
+##(4) define an interaction contrast that tests whether the difference between G and A is itself different between L and H treatments.
+```{r}
+
+#TABLE KEY!!!
+#NutrientLevel FoodWeb emmean   SE df lower.CL upper.CL
+# H             A        10.05 2.01 30     5.94     14.2
+# L             A        12.44 1.73 30     8.91     16.0
+# H             G        16.16 1.73 30    12.63     19.7
+# L             G        19.26 2.05 30    15.07     23.5
+# H             P         9.65 2.06 30     5.44     13.9
+# L             P        17.23 2.26 30    12.61     21.8
+ 
+##(1) - (4)
+contrats_pah <- contrast(emmeans(trt.control.contrast, specs = ~ NutrientLevel * FoodWeb),
+         method = list("H: P - G" = c(0, 0, -1, 0, 1, 0),
+                       "L: P - G" = c(0, 0, 0, -1, 0, 1),
+                       "AVG:P - G" = c(0, 0, -0.5, -0.5, 0.5, 0.5),
+                       "Interaction Contrast" = c(0, 0, -1, -1, 1, 1) ))
+
+contrats_pah
+```
+
+When looking at these interactions, there was a significant influence of predators (P) in high nutrient areas (p = 0.0217) compared to low nutrient areas, which showed no significant effects (p = 0.5182). This means that richness decreased in both areas with predator presence, but the decrease was greater in high nutrient areas. When averaged across both nutrient levels, richness in predator treatments significantly decreased by 4.37 units compared to grazer treatments (p = 0.0510), suggesting a general trend of lower richness when predators are present. The interaction contrast further supports this, showing that the difference between predators and grazers in high nutrient areas is 8.54 units larger than in low nutrient areas (p = 0.0510), indicating that the effect of predators on richness within these mesocosms is influenced by nutrient availability. These results demonstrate that predators contribute to richness loss through top-down control and by altering the overall community structure.
+
+
+

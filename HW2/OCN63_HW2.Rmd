@@ -1,0 +1,169 @@
+---
+title: "Two_Factor_Factorial_Design"
+author: "Dylan Kelling"
+date: "2/22/2023"
+output: html_document
+---
+
+#####Factorial Designs#######
+#############################
+###two-way factorial
+
+```{r}
+dat<-read.csv("factorial_example - factorial_example.csv")
+names(dat)
+str(dat)
+head(dat)
+
+```
+
+```{r}
+install.packages("devtools")
+install.packages("fishualize")
+install.packages("raster")
+
+```
+
+
+
+```{r}
+#####create randomization
+library(agricolae)
+
+#2x2 crd factorial with 5 reps
+trt<-c(2,2)
+fac_crd<-design.ab(trt, r=5, design ="crd") #trt factorial, r = #reps
+
+fac_crd$book
+
+#If we wanted to export into a csv
+write.csv(fac_crd$book, "fac_crd.csv")
+
+###preliminary visual exploration of the data
+library(ggplot2)
+ggplot(data = dat, aes(x = Competition , y = Weight, colour = pH)) + geom_boxplot()
+
+```
+
+```{r}
+##linear model of the data
+out<- lm(Weight~pH + Competition + Competition:pH, data=dat)
+summary(anova(out))
+#anova model for the data (This is s shortcut to write for the code above)
+out1<-aov(Weight ~ pH*Competition, data=dat)
+summary(out1)
+
+```
+
+```{r}
+#check assumtions
+par(mfrow=c(2,2)) #make it four paneled output
+plot(out1)
+
+#check for normality
+#Perform a Shapiro-Wilk test for normality of residuals 
+shapiro.test(out1$residuals) 
+
+#check for equal variance
+#Perform Levene's Test for homogenity of variances
+library(car) 
+leveneTest(Weight ~ pH*Competition, data=dat, center = mean) 
+leveneTest(Weight ~ pH*Competition, data=dat, center = median)
+
+#check for optimal transformation
+library(MASS)
+bc<-boxcox(out) #Boxcox transformation
+lambda<- bc$x[which.max(bc$y)]
+lambda
+tweight<-(dat$Weight)^lambda
+
+out2<-aov(tweight ~ pH*Competition, data=dat)
+summary(out2)
+plot(out2)
+shapiro.test(out2$residuals) 
+
+```
+
+```{r}
+
+library(car)
+
+#agregate the means
+library(dplyr)
+factorial_means <- 
+  dat %>% 
+  group_by(Competition, pH) %>% # <- remember to group by *both* factors
+  summarise(Means = mean(Weight))
+factorial_means
+
+#This creates an object, factorial means
+
+#plot the means
+ggplot(factorial_means, 
+       aes(x = Competition, y = Means, colour = pH, group = pH)) +
+  geom_point(size = 4) + geom_line()
+
+#Tukey HSD
+TukeyHSD(out1, which = 'pH:Competition') #use the anova model, tell the model which compariosn to make
+
+#Tukey HSD in agricoale
+library(agricolae)
+multicomparison<-HSD.test(out1, trt = c("pH", "Competition"), console = TRUE)
+
+##make a plot of the relevant comparison
+bar.group(multicomparison$groups, ylim=c(0,9))
+
+```
+
+```{r}
+
+####other descriptive plots
+#calculate means for each treatment combination
+factorial_stats <- 
+  dat %>% 
+  group_by(Competition, pH) %>% # <- remember to group by the two factors
+  summarise(Means = mean(Weight), SE = sd(Weight)/sqrt(n()))
+factorial_stats
+
+#step 2. plot these as an interaction plot
+ggplot(factorial_stats, 
+       aes(x = Competition, y = Means, colour = pH,
+           ymin = Means - SE, ymax = Means + SE)) +
+  # this adds the mean
+  geom_point(size = 3) +
+  # this adds the error bars
+  geom_errorbar(width = 0.1) +
+  # controlling the appearance
+  scale_y_continuous(limits = c(2, 7)) + 
+  xlab("Competition") + ylab("Yield (g dry weight)")
+
+
+```
+
+```{r}
+# define a position adjustment 
+pos <- position_dodge(0.15)
+# make the plot
+ggplot(factorial_stats, 
+       aes(x = Competition, y = Means, colour = pH,
+           ymin = Means - SE, ymax = Means + SE)) +
+  # this adds the mean (shift positions with 'position =')
+  geom_point(size = 3, position = pos) +
+  # this adds the error bars (shift positions with 'position =')
+  geom_errorbar(width = 0.1, position = pos) +
+  # controlling the appearance
+  scale_y_continuous(limits = c(2, 7)) + 
+  xlab("Competition") + ylab("Yield (g dry weight)")
+
+###bar-plots
+ggplot(factorial_stats, 
+       aes(x = Competition, y = Means, fill = pH,
+           ymin = Means - SE, ymax = Means + SE)) +
+  # this adds the mean
+  geom_bar(stat = "identity", position = position_dodge()) +
+  # this adds the error bars
+  geom_errorbar(position = position_dodge(0.9), width=.2) +
+  # controlling the appearance
+  xlab("Competition") + ylab("Yield (g dry weight)")
+
+```
