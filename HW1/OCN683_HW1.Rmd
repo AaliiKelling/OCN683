@@ -1,0 +1,353 @@
+---
+title: "OCN683_HW1"
+author: "ʻAʻaliʻi Kelling"
+date: "2025-01-22"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+
+#load R packages
+library(tidyverse)
+library(car)
+library(janitor) #cleaning data function
+library(here) #enables easy file referencing 
+library(rstatix) #descriptive stats
+library(ggeffects) #effects plot
+library(ggplot2)
+
+
+```
+#Introduction
+
+##
+
+```{r}
+#Load data 
+
+bird <- read_csv("foraging.height.edit (1).csv")
+head(bird)
+
+```
+
+
+```{r}
+#Clean data using janitor package 
+str(bird)
+
+bird <- clean_names(bird) #fix column names
+
+
+bird <- bird %>% 
+  select (-x1) %>%  #removing first column X
+  mutate(date = mdy(date)) %>%
+  mutate(species = as.factor(species)) %>% #correct variable types
+  mutate(kipuka = as.factor(kipuka)) %>% 
+  mutate(rat_removal = as.factor(rat_removal)) %>% 
+  mutate(dietary_grouping = as.factor(dietary_grouping))
+
+str(bird)
+
+```
+
+## (1) Start with some data exploration. How many observations are there of each bird species in each experimental treatment? Make a boxplot or violinplot to show the distribution of foraging heights of each bird species in each experimental treatment.
+
+
+
+  For the ʻApapane (APAP), there are 131 observations in the treated group and 188 observations in the untreated group. For the Hawaiʻi ʻAmakihi (HAAM), there are 47 observations in the treated group and 42 observations in the untreated group. For the ʻIʻiwi (IIWI), there are 30 observations in the treated group and 43 observations in the untreated group. Finally, for Japanese White-eye (JAWE), there are 16 observations in the treated group and 9 observations in the untreated group. Shown below is the boxplot and table of species by treatment.
+
+```{r}
+#remove other species we don't care about
+bird <- bird %>%
+  filter(!species %in% c("HAEL", "OMAO"))
+
+# summarize per species and get total observations 
+bird_count <- bird %>%
+  group_by(species, rat_removal) %>%
+  summarise(n = n()) 
+bird_count
+
+#Data Visualization 
+ggplot(bird) +
+  geom_boxplot(aes(x = species, y = foraging_ht_m, color = rat_removal)) +
+  geom_jitter(aes(x = species, y = foraging_ht_m, color = rat_removal), alpha = 0.2,
+              position = position_jitterdodge(jitter.width = 0.1)) +
+  ylim(0, 30) +
+  labs(
+    x = "Bird Species",
+    y = "Foraging Height (m)",
+    color = "Rat Removal"
+  ) +
+  theme_minimal()
+
+
+```
+
+##(1) What have you learned so far?
+
+  The removal of rats as a treatment appears to have a significant effect on the mean foraging heights of the bird species, with most birds foraging at higher mean heights in areas that remain untreated (rat presence). This pattern suggests that rat presence might influence bird foraging behavior, potentially driving birds to forage higher to avoid competition or predation risks associated with rats. However, for the Japanese White-eye (JAWE), while the mean foraging height is higher in untreated areas, the mean values for both treatment groups are relatively similar, indicating a less pronounced effect of rat removal on this species.
+
+
+##(2) Now make a plot showing the mean foraging height of each bird species in eachtreatment, and include error bars displaying +/- one standard error of the mean.
+
+```{r}
+#Descriptive stats for mean foraging height and se of mean
+summary_stats <- bird %>%
+  group_by(species, rat_removal) %>%
+  summarise(
+    mean_height = mean(foraging_ht_m),
+    sem_height = sd(foraging_ht_m) / sqrt(n())
+    )
+summary_stats
+
+#Plot
+# Standard error of the mean
+pd <- position_dodge(0.5) #stagger points on plot
+
+ggplot(summary_stats, aes(x = species, y = mean_height, color = rat_removal)) +
+  geom_point(position = pd, size = 2) +
+  geom_errorbar(aes(ymin = mean_height - sem_height, ymax = mean_height + sem_height), 
+                width = 0.1, position = pd) +
+  ylim(0, 30) +
+  labs(
+    x = "Bird Species",
+    y = "Foraging Height (m)",
+    color = "Rat Removal"
+  ) +
+  theme_minimal()
+
+
+
+```
+##(2) What is the meaning of the standard error of the mean? How does this plot differ from the plot in #1? 
+
+  The standard error of the mean (SEM) indicates how confident we can be that the sample mean represents the population mean. Smaller SEM values mean higher confidence and more precise estimates. This plot (2) focuses on the SEM to summarize the reliability of the means, while the first plot illustrates the spread and variability of the raw data points, showing individual data values rather than a summary statistic like SEM.
+
+## (3) Fit a linear model that tests whether the bird species differ in foraging height, whether the rat removal treatment affects foraging height, and whether the effect of the rat removal differs between the bird species. Make plots to assess the distribution of the residuals. Report F-tests for the terms of the model. 
+
+```{r}
+#linear model for species 
+lm_foragingheights <- lm(foraging_ht_m ~ species * rat_removal, data = bird)
+summary(lm_foragingheights)
+
+#Check the residuals
+par(mfrow = c(2, 2)) # 2x2 plot layout
+plot(lm_foragingheights)
+
+par(mfrow = c(1, 1))
+hist(residuals(lm_foragingheights), main = "Histogram of Residuals", xlab = "Residuals")
+
+
+```
+
+  When running the liner model, the results show that IIWI was the only bird that differed in foraging height (p=0.01148) with this species being the highest forager in both treatments. As for the effects of whether or not the rat removal differed between bird species, there were no significant results. 
+
+
+##(3) Report F-tests for the terms of the model. Create an effects plot displaying the fitted effects. How do you interpret the results? What are the magnitudes of the effects?
+
+```{r}
+#ANOVA on lm
+aov_lm <- Anova(lm_foragingheights)
+Anova(lm_foragingheights)
+
+
+# Plot the effects
+plot(ggeffect(lm_foragingheights, terms = c('species', 'rat_removal')))
+
+```
+
+The F tests for the terms of the model include:
+- Species (F=4.9528, p=0.002)
+- rat_removal (F=16.1081, p=<0.001)
+- species:rat_removal (f=0.4757, p=0.699318)
+
+  Based on these results, both species and rat removal have significant effects on foraging height. Species differences show that each bird species has significantly different average foraging heights. Rat removal also significantly impacts foraging behavior, indicating that birds forage at higher levels when rats are present. This could mean that birds adjust their foraging height to avoid competition or access better food resources when rats are around.
+
+  The magnitude of these effects can be seen in the sum of squares from the ANOVA table. Rat removal has a larger sum of squares (SS=362.5) compared to species (SS=334.4), meaning that rat removal has a stronger influence on foraging heights than the differences between species. The interaction term is not significant (p=0.6993), suggesting that the effects of species and rat removal are independent and do not vary based on their combination.
+
+## (4) Kipuka area and arthopod biomass are both continuous predictors – before you add them to the model, make some scatterplots to assess whether these predictors should be transformed when including them in the model. When assessing predictors for transformation, it doesn’t matter if the predictors are normally distributed (this only matters for the response variable) – what matters is whether the predictors are very skewed, such that a few outlying points will have a large influence on a fitted regression line. For skewed predictors, a log or square root transformation will generally help.
+
+
+```{r}
+#Scatter plot of Kipuka vs Foraging height
+ggplot(bird) +
+  geom_point(aes(x = area_ha, y = foraging_ht_m)) +
+  geom_smooth(aes(x = area_ha, y = foraging_ht_m), 
+              method = "lm", se = FALSE)  +
+  labs(
+    x = "Kipuka area (ha)",
+    y = "Foraging Height (m)",
+    title = "Kipuka area vs Foraging Height"
+  ) +
+  theme_minimal()
+
+
+#Scatter plot of arthropod biomass vs Foraging height
+ggplot(bird) +
+  geom_point(aes(x = tot_arth_bm, y = foraging_ht_m)) +
+  geom_smooth(aes(x = tot_arth_bm, y = foraging_ht_m), 
+              method = "lm", se = FALSE)  +
+  labs(
+    x = "Arthopod biomass",
+    y = "Foraging Height (m)",
+    title = "Arthopod biomass vs Foraging Height"
+  ) +
+  theme_minimal()
+
+#closer look using histograms 
+ggplot(bird) +
+  geom_histogram(aes(x = area_ha), fill = "orange", color = "red", binwidth = 1) +
+  labs(title = "Histogram of Kipuka Area")
+#Distribution looks bimodal, concentrated around 0-4 and 9-12
+
+ggplot(bird) +
+  geom_histogram(aes(x = tot_arth_bm), fill = "orange", color = "red", binwidth = 1) +
+  labs(title = "Histogram of Arthopod Biomass")
+#Distribution is heavily skewed to the left
+
+#transforming data
+bird <- bird %>%
+  mutate(log_kipuka = log(area_ha + 1)) %>%
+  mutate(log_arth_bm = log(tot_arth_bm + 1))
+
+#View(bird)
+
+```
+Based on these raw plots, it looks like the kipuka area splits onto two ha groups 1) 0 - 3.68 and 2) 10.23 - 12.04. The Arthropod biomass also shows a strong right skew in which these predictors should be transformed.
+
+```{r}
+#Plotting log transformed data
+#Scatter plot of Kipuka vs Foraging height
+ggplot(bird) +
+  geom_point(aes(x = log_kipuka, y = foraging_ht_m)) +
+  geom_smooth(aes(x = log_kipuka, y = foraging_ht_m), 
+              method = "lm", se = FALSE)  +
+  labs(
+    x = "Kipuka area (ha)",
+    y = "Foraging Height (m)",
+    title = "Kipuka area vs Foraging Height"
+  ) +
+  theme_minimal()
+
+
+#Scatter plot of log transformed artho bm vs Foraging height
+ggplot(bird) +
+  geom_point(aes(x = log_arth_bm, y = foraging_ht_m)) +
+  geom_smooth(aes(x = log_arth_bm, y = foraging_ht_m), 
+              method = "lm", se = FALSE)  +
+  labs(
+    x = "Arthopod biomass",
+    y = "Foraging Height (m)",
+    title = "Arthopod biomass vs Foraging Height"
+  ) +
+  theme_minimal()
+
+```
+These transformations make these predictors look much better!
+
+## (4) So far we have examined the effect of the rat removal, but we have not considered the role of kipuka size, or the role of food availability (which is influenced in part by kipuka size). Make a new model that adds kipuka area and arthopod biomass as predictors, and include interactions that test whether the treatment effect depends on these additional predictors. Report F-tests and effects plots. How do the results of this model differ from the model in #3? How do you interpret the results at this stage?
+
+```{r}
+all_lm <- lm(foraging_ht_m ~ species * rat_removal * log_kipuka * log_arth_bm, data = bird)
+summary(all_lm)
+
+Anova(all_lm)
+
+```
+
+  This new model above includes the log transformed kipuka size and arthopod biomass along with their interactions with bird species and rat treatments. The purpose being to look at the effects of rat removal on foraging height thatʻs dependant on both habitat size and food availability.
+  Based on the Anova table, log_kipuka was highly significant (F=201.48, p=<2.2e-16) while log_arth_bm was not significant (F=2.72, p=0.10). As for significant interactions:
+  
+- Species: log_kipuka
+- species:log_kipuka:log_arth_bm
+- rat_removal:log_kipuka:log_arth_bm 
+- species:rat_removal:log_kipuka:log_arth_bm
+
+Were all found as significant factors and interactions.
+
+```{r}
+
+all_lm <- lm(foraging_ht_m ~ species * rat_removal * log_kipuka * log_arth_bm, data = bird)
+summary(all_lm)
+
+Anova(all_lm)
+
+ggeffect(all_lm)
+
+# Generate effects for the model 
+effects_plot <- ggpredict(all_lm, terms = c("log_kipuka", "log_arth_bm", "species", "rat_removal"))
+
+# Plot the effects 
+plot(effects_plot)
+
+#Focused interactions between significant factors
+#log_kipuka with rat_removal interaction (SHowing the relationship between kipuka size and foraging height)
+kipuka_rat_effects <- ggpredict(all_lm, terms = c("log_kipuka", "rat_removal"))
+
+plot(kipuka_rat_effects) +
+  ggtitle("Effect of Kipuka Size and Rat Removal on Foraging Height") +
+  xlab("Log Kipuka Size") +
+  ylab("Predicted Foraging Height")
+
+
+#log_arth_bm with rat_removal interaction (The effects of food availability (arthropod biomass) on our treatment (rat removal))
+arth_rat_effects <- ggpredict(all_lm, terms = c("log_arth_bm", "rat_removal"))
+
+# Plot the interaction
+plot(arth_rat_effects) +
+  ggtitle("Effect of Arthropod Biomass and Rat Removal on Foraging Height") +
+  xlab("Log Arthropod Biomass") +
+  ylab("Predicted Foraging Height")
+
+
+# species, rat_removal, and log_kipuka interaction
+three_way_effects <- ggpredict(all_lm, terms = c("log_kipuka", "rat_removal", "species"))
+
+# Plot the interaction
+plot(three_way_effects) +
+  ggtitle("Three-Way Interaction: Species, Rat Removal, and Kipuka Size") +
+  xlab("Log Kipuka Size") +
+  ylab("Predicted Foraging Height")
+
+
+```
+
+Based on these effect plots, when comparing log_kipuka with rat_removal it looks like larger kipuka sizes might enhance foraging height more in nontreated areas compared to treated areas. As for the effect of arthropod biomass, the foraging height for nontreated sites increase more steeply with increasing arthropod biomass compared to treated sites.
+  The threeway interaction plot show that for most species, rat removal has minimal effects ib foraging height across kipuka size. However, for JAWE, rat removal seems to interact with kipuka size allowing birds to forage higher in larger spaces in treated areas. The kipuka size has species specific effects where APAP, HAAM, and JAWE has a postive relationship and IIWI has a negative relationship.
+
+
+
+
+
+
+## (5) One thing we have not accounted for in our models is the fact that the study design involves repeated measurements of the same kipuka (and potentially the same birds) over time. We will learn how to properly account for repeated measures, by adding a random effect for kipuka, later in the course. However, there is a different additional predictor that may be helpful in testing the treatment effect. Add DATE as a factor to the linear model from #4. How does the inclusion of the date of sampling alter the model results? Why do you think that is?
+
+
+```{r}
+#set date as factor
+bird <- bird %>%
+  mutate(date_factor = factor(date)) %>%
+  mutate(year_factor = factor(year))
+
+all_lm_with_date <- lm(foraging_ht_m ~ species * rat_removal * log_kipuka * log_arth_bm + date_factor, data = bird)
+summary(all_lm_with_date) 
+
+#adding in the date has a significant effect on foraging height 
+#aov of new model
+Anova(all_lm_with_date)
+
+# Generate effects for the model 
+effects_plot <- ggpredict(all_lm_with_date, terms = c("log_kipuka", "log_arth_bm", "species", "rat_removal"))
+
+# Plot the effects 
+plot(all_lm_with_date)
+
+```
+ 
+  With the addition of date as a factor, we see more significant predictors and interactions in the model. For example, rat_removal, date_factor, rat_removal:log_kipuka, and species:rat_removal:log_kipuka are now significant, whereas species:log_kipuka, species:log_arth_bm, and log_kipuka:log_arth_bm, which were significant before, are no longer significant.
+  Adding date seems to explain more variation, likely because it accounts for temporal effects such as seasonal changes. This is supported by the decreased residual sum of squares, which suggests that including date makes the model a better fit. This makes sense because date is an important factor when collecting data, as it reflects how seasonal patterns, like food availability or bird movement, might influence foraging height.
+
