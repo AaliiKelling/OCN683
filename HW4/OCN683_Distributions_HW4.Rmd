@@ -1,0 +1,320 @@
+---
+title: "OCN683_Distributions_HW4"
+author: "ʻAʻaliʻi Kelling"
+date: "2025-02-11"
+output: html_document
+---
+
+## **Homework 4 - Distributions for surviving copepods and abundant tang**
+
+## **Background** 
+The file ‘dam_acartia_survival_subset.csv’ contains some data on the survival of the copepod Acartia tonsa, from a study conducted by Hans Dam and colleagues. In experimental cultures the survival of copepods was tracked from the nauplius 1 stage to the copepodid 6 stage. The data used here is a subset: only the copepods reared at temperature 18ºC, and with survival measured at day 14. The column ‘nx’ is the number of surviving copepods, out of 25, on day 14. We are going to investigate the distribution of this subset of the data.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Loading datasets
+```{r, echo=FALSE}
+#load R packages
+library(dplyr)
+library(arm)
+library(tidyr)
+library(tidyverse)
+library(psych)
+library(car)
+library(janitor) #cleaning data function
+library(here) #enables easy file referencing 
+library(rstatix) #descriptive stats
+library(ggeffects) #effects plot
+library(ggplot2)
+library(emmeans)
+library(ggpubr)
+library(fishualize)
+library(MASS)
+
+cope <- read.csv("dam_acartia_survival_subset.csv")
+tang <- read.csv("yellowtang.csv")
+
+str(cope)
+str(tang)
+
+cope <- cope %>%
+  mutate_at(vars(Temp, time), 
+            as.factor)
+
+tang <- tang %>%
+  mutate_at(vars(commonname, time), 
+            as.factor)
+
+```
+
+## **Task 1** 
+(1 – 3 points) First plot a histrogram of the data, using the discrete.histogram() function from the package ‘arm’. This function is better than standard histogram functions for our purposes, because the standard binning algorithms makes it hard to see what is happening at the ends of the distribution. 
+
+```{r}
+#make a histogram of the number of survivors per plot 
+ discrete.histogram(cope$nx, 
+                    main = "Survival Distribution of Acartia tonsa", 
+                   xlab = "Number of surviving copepods (nx)")
+```
+
+## **Task 2** 
+(2 – 4 points) Now calculate the mean and the variance of the number of survivors. This kind of data could potentially be modelled as a binomial distribution. Based on the formula for the binomial distribution (it is in the lecture notes, or on Wikipedia), what should the variance be, if the data were actually binomially distributed, given the mean number of survivors we observe? 
+
+```{r}
+#Calculting the mean and variance of the survival data
+copestats <- cope %>%
+  summarise(
+    mean = mean(nx), #Mean = 17.4
+    variance = sd(nx) #Variance = 7.6
+  )
+copestats 
+
+# Total copepods per trial
+cope_total <- 25 
+
+# Estimated survival probability
+p_survival <- copestats$mean / cope_total 
+
+# Expected variance under a binomial model
+binom_var <- cope_total * p_survival * (1 - p_survival)
+binom_var
+
+
+
+```
+
+## **Answer** 
+Since the observed variance (7.6) is greater than the expected variance (5.29), the data may be showing overdispersion. What this means is that the probailities of copepod survival may not be entirely independant and could be influenced by other underlying factors.
+
+
+## **Task 3** 
+(3 – 4 points) Use the function rbinom() to simulate random draws from a binomial distribution that has the same probability of survival as the observed copepod data. Draw the same number of values as are present in the observed data. Calculate the mean and the variance of the number of survivors. Plot a histogram of your randomly drawn values. Now repeat this four more times – you will have a total five histograms as well as five means and variances. Describe how your simulated binomial data differs from the observed data. Can you imagine reasons why the two distributions might be different?
+
+
+```{r}
+ 
+# Number of observations (same as in the dataset)
+num_obs <- length(cope$nx)  
+
+# Define number of simulations
+n_simulations <- 4  
+
+# Create empty lists to store results
+simulated_data <- list()  
+simulated_means <- numeric(n_simulations)  # Store means
+simulated_variances <- numeric(n_simulations)  # Store variances
+
+# Set up the graphics area for 6 histograms (1 observed + 4 simulations)
+par(mfrow = c(2, 3))
+
+# Plot the histogram for observed data first
+discrete.histogram(cope$nx, col = "red", main = "Observed Data", freq = FALSE)
+
+# Loop to generate 5 different simulated datasets
+set.seed(123)  # For reproducibility
+for (i in 1:n_simulations) {
+  # Generate binomial survival data for the same number of observations as the dataset
+  simulated_data[[i]] <- rbinom(num_obs, cope_total, p_survival)
+  
+  # Compute mean and variance for the simulated dataset
+  simulated_means[i] <- mean(simulated_data[[i]])
+  simulated_variances[i] <- sd(simulated_data[[i]])
+  
+  # Plot histogram for each simulation
+  discrete.histogram(simulated_data[[i]], col = "skyblue",
+                     main = paste("Simulation", i), freq = FALSE)
+}
+
+# Five simulated means and variances to their observed values
+mean(cope$nx)
+simulated_means
+sd(cope$nx)
+simulated_variances
+
+```
+
+## **Answer** 
+These simulated histograms show much more normal distributions compared to the observed data that has much more spread and variability within surviving copepods. Comparing these results to our simulated means and variances, our simulated means (17.2 - 17.4) are within the range of our observed mean (17.3). However, when looking at the simulated variances (1.9 - 2.5), these values are much lower than the observed variance value (7.6) which may suggest that there is over dispersion within this data. This could be suggesting that the individual survivability of copepods are not independent and could be influenced by other factors
+
+
+## **Task 4** 
+(4 – 4 points) Now load the package VGAM, which has functions for the beta-binomial distribution. This distribution is similar to the binomial, in that it models success/failure of a ‘trial’, but it allows the probability of success to vary across trials. This extra variability is controlled by the parameter ‘rho’. Use trial and error, with the function rbetabinom, to find a value of rho that creates a distribution that looks similar to the observed copepod  data. A value of 0 for rho produces a binomial distribution, while increasing values of rho between 0 and 1 lead to more variability in the data. Display the results of your trial and error simulations, and report what value of rho you think best corresponds to the observed data.
+
+```{r}
+library(VGAM)
+
+# Define rho values to test (0 = binomial, increasing values = more variability)
+rho_values <- c(0.40, 0.41, 0.42, 0.43, 0.44, 0.45)
+
+# Create empty lists to store results
+simulated_data <- list()  
+simulated_means <- numeric(length(rho_values))  # Store means
+simulated_variances <- numeric(length(rho_values))  # Store variances
+
+# Set up the graphics area for 6 histograms (1 observed + 5 simulations)
+par(mfrow = c(2, 3))
+
+# Plot the histogram for observed data first
+discrete.histogram(cope$nx, col = "red", main = "Observed Data", freq = FALSE)
+
+# Loop to generate 5 different simulated datasets using Beta-Binomial distribution
+set.seed(123)  # For reproducibility
+for (i in 1:length(rho_values)) {
+  # Generate beta-binomial survival data for the same number of observations as the dataset
+  simulated_data[[i]] <- rbetabinom(num_obs, cope_total, p_survival, rho_values[i])
+  
+  # Compute mean and variance for the simulated dataset
+  simulated_means[i] <- mean(simulated_data[[i]])
+  simulated_variances[i] <- sd(simulated_data[[i]])
+  
+  # Plot histogram for each simulation
+  discrete.histogram(simulated_data[[i]], col = "skyblue",
+                     main = paste("Beta-Binomial (rho =", rho_values[i], ")"), freq = FALSE)
+}
+
+# Five simulated means and variances to their observed values
+mean(cope$nx)
+simulated_means
+sd(cope$nx)
+simulated_variances
+
+```
+
+## *Answer* 
+A rho of 0.42 best corresponds to the observed data with a simulated mean of 17.79 and a variance of 7.3. The simulated mean and variance was the closest compared to all other trials making this value the most appropriate. 
+
+
+## *Instructions* 
+The other common kind of discrete data that we will discuss in this class is count data.The file ‘yellowtang.csv’ contains counts of the reef fish yellow tang (lauʻipala) from sites around Hawai’i Island collected by NOAA. The column with the counts is called ‘count’. We’re going to repeat everything we did the copepod data, but instead of using the binomial and beta-binomial distributions, we will use the poisson and negative binomial distributions for the count data. 
+
+## *Task 5* 
+(5 – 3 points) Plot a histogram of the yellow tang counts.
+```{r}
+#View(tang)
+#make a histogram of yellow tang counts 
+ discrete.histogram(tang$count, 
+                    main = "Distribution of the Yellow tang", 
+                   xlab = "Species abundance")
+
+# Create histogram for fish count
+tangcount <- hist(tang$count) 
+abline(v=mean(tang$count),col="blue")
+abline(v=median(tang$count),col="red")
+tangcount #Left Skewed
+
+
+```
+
+
+## *Task 6* 
+Calculate the mean and variance of the counts. Also calculate what the variance would be if the counts were poisson-distributed. How does it differ from the observed data? Why might that be?
+```{r}
+#Calculating the mean and variance of the yellow tang
+tangstats <- tang %>%
+  summarise(
+    mean = mean(count), #Mean = 5.0
+    variance = sd(count),#Variance = 6.0
+    PoissonVariance = mean(count) #Poisson Variance = observed mean = 5.0
+  )
+tangstats 
+
+```
+
+## **Answer** 
+The observed mean of Yellow tang fish counts was 5.0 and the variance was 6.0. I the counts were Poisson distributed, the expected variance would be the equal to the mean of the observed counts (5.0). Based on this information, the observed variance (6.0) is higher than the Posison variance (5.0) suggesting that the Poisson model underestimates variability between counts. This could be because the Poisson model assumes that 1) Yellow tang counts occur independently, 2) each individual has an equal chance of being observed in each survey, and 3) the variance should be equal to the mean. Becuase the Poisson model assumes a constant rate of fish detection, it doesn't take into consideration how other factors such as environemnt could influence the abundance of this species. 
+
+
+## **Task 7** 
+(7 – 4 points) Simulate five sets of random draws from the poisson distribution with the appropriate mean and variance (using the function rpois()). Plot histograms of the results, and report the means and variances of the simulated data. Verbally compare these distributions to the observed distribution. 
+```{r}
+# Load required package
+set.seed(123)  # Set seed for reproducibility
+
+# Define parameters
+obs_mean <- 5  # Observed mean
+num_obs <- length(tang$count)  # Number of observations in the dataset
+n_simulations <- 5  # Number of simulations
+
+# Create empty lists to store results
+simulated_data <- list()
+simulated_means <- numeric(n_simulations)
+simulated_variances <- numeric(n_simulations)
+
+# Set up plot area for 6 histograms 
+par(mfrow = c(2, 3))
+
+# Plot histogram of observed data first
+discrete.histogram(tang$count, col = "red", main = "Observed Data", freq = FALSE)
+
+# Generate 5 sets of Poisson-distributed counts
+for (i in 1:n_simulations) {
+  # Simulate Poisson-distributed counts
+  simulated_data[[i]] <- rpois(num_obs, lambda = obs_mean)
+
+  # Compute mean and variance for the simulated dataset
+  simulated_means[i] <- mean(simulated_data[[i]])
+  simulated_variances[i] <- sd(simulated_data[[i]])
+
+  # Plot histogram of simulated data
+  discrete.histogram(simulated_data[[i]], col = "skyblue",
+                     main = paste("Poisson Simulation", i), freq = FALSE)
+}
+
+# Print observed mean and variance
+mean(tang$count)
+simulated_means
+sd(tang$count)
+simulated_variances
+
+```
+
+## **Answer**
+When comparing the observed mean and variance to the simulated values, all the simulated mean values (4.9 - 5.0) were very close to the observed mean (5.0269), but had lower variance than the observed data (6.0). Among the Poisson-simulated datasets, Simulated Set 2 had the closest match to both the observed mean and variance (Sim Mean = 5.04, Sim Variance = 2.03). When comparing the Poisson simulated distributions to the observed distribution, the Poisson model resembles a bell-shaped curve, while the observed data is right-skewed. Additionally, the observed data shows higher variability in fish counts, reaching values up to 50, whereas the simulated values mostly range from 0 to 14. This difference occurs because Poisson distributions assume that the variance equals the mean, leading to a tighter distribution around the mean. However, the observed data shows greater variation than Poisson predictions, indicating overdispersion. This could be due to environmental variability, or even fish clustering behavior.
+
+
+
+## **Task 8** 
+(8 – 4 points) Perform trial and error to find good-fitting parameter values from the negative binomial distribution, which can model counts with more variability than the poisson distribution. Use the function rnegbin() from the package ‘MASS’. The parameter ‘theta’ is the one you will want to manipulate to change the shape of the distribution (keep the value of the mean, mu, the same as the observed data). Hint: smaller values of theta lead to larger variances. 
+```{r}
+# Define theta values to test (smaller values increase variance)
+theta_values <- c(0.8,0.81, 0.82, 0.83, 0.84, 0.85, 0.86, 0.87, 0.89, 0.9)
+
+# Create empty lists to store results
+simulated_data <- list()
+simulated_means <- numeric(length(theta_values))
+simulated_variances <- numeric(length(theta_values))
+
+# Set up plot area for histograms (1 observed + 5 simulated)
+par(mfrow = c(2, 3))
+
+# Plot histogram of observed data first
+discrete.histogram(tang$count, col = "red", main = "Observed Data", freq = FALSE)
+
+# Loop through different theta values
+set.seed(123)  # For reproducibility
+for (i in 1:length(theta_values)) {
+  # Generate Negative Binomial survival data with the same mean
+  simulated_data[[i]] <- rnegbin(length(tang$count), mu = obs_mean, theta = theta_values[i])
+
+  # Compute mean and variance for the simulated dataset
+  simulated_means[i] <- mean(simulated_data[[i]])
+  simulated_variances[i] <- sd(simulated_data[[i]])
+
+  # Plot histogram for each simulation
+  discrete.histogram(simulated_data[[i]], col = "skyblue",
+                     main = paste("Negative Binomial (theta =", theta_values[i], ")"), freq = FALSE)
+}
+
+# Print results for comparison
+mean(tang$count)
+simulated_means
+sd(tang$count)
+simulated_variances
+
+```
+
+## **Answer**
+After testing differewnt theta values, the best fit was found with theta = 0.87 , which produced a simulated mean of 6.04 (Close to the observed mean: 5.03) and simulated Variance of 5.06 (Very close to observed variance: 5.9973)!
+The Negative Binomial model improves the overall fit much better than the Poisson model because it accounts for the overdispersion in Yellow Tang fish counts. This suggests that fish counts are influenced by factors beyond simple random variation, such as environmental differences between sites or even something like clustering behavior of fish, which violates the Poisson assumption of independent counts. Therefore, the Negative Binomial model is better suited than Poisson for modeling Yellow Tang counts because it correctly accounts for the higher-than-expected variance.
