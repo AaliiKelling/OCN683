@@ -1,0 +1,217 @@
+---
+title: "HW5_Modeling_KoleCounts"
+author: "ʻAʻaliʻi Kelling"
+date: "2025-02-20"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## **Homework 5 - Modeling Kole Counts**
+
+# **Instructions **
+In this assignment we will again analyze NOAA reef fish survey data. The goal is to learn how to model count data, and to get a sense for the challenges in trying to deduce processes from observed patterns.
+
+Imagine that we are interested in the habitat characteristics that favor Ctenochaetus strigosus, known as kole in Hawaiian, and with the English common name spotted surgeonfish in this dataset. 
+
+We will focus on the role of different types of benthic substrate, and the most common substrate types in this dataset are:
+- turf algae (column ‘ta’), 
+- hard coral (column ‘hard_coral’), 
+- sand (column ‘sand’), and 
+- crustose coralline algae (column ‘cca’). 
+
+I have included a dataset that only includes this species, and only the sampling period during which turf algae percent cover was measured.
+
+
+## Loading datasets
+```{r, echo=FALSE}
+#load R packages
+library(dplyr)
+library(arm)
+library(tidyr)
+library(tidyverse)
+library(psych)
+library(car)
+library(janitor) #cleaning data function
+library(here) #enables easy file referencing 
+library(rstatix) #descriptive stats
+library(ggeffects) #effects plot
+library(ggplot2)
+library(emmeans)
+library(ggpubr)
+library(fishualize)
+library(MASS)
+library(GGally)
+library(lmtest)
+
+
+
+
+kole <- read.csv("CRCP_Reef_Fish_Surveys_Hawaii_kole.csv")
+
+str(kole)
+
+kole <- kole %>%
+  mutate_at(vars(ta, hard_coral, sand, cca), 
+            as.numeric)
+
+
+
+```
+
+## **Task 1** 
+Start by exploring the distributions of the four predictor variables, and how they are correlated with one another. The function ggpairs() in the package GGally is particularly nice for this.
+
+```{r}
+# Clean data
+kole <- clean_names(kole)
+
+# 4 predictor variables
+kole_predictors <- kole %>%
+  select(ta, hard_coral, sand, cca) %>%
+  drop_na()  # Remove rows with missing values
+
+summary(kole_predictors)
+
+
+#Plotting distributions
+kole_predictors %>%
+  gather(key = "Variable", value = "Value") %>%  # Reshape data for ggplot
+  ggplot(aes(x = Value)) +
+  geom_histogram(bins = 30, fill = "skyblue", color = "black") +
+  facet_wrap(~ Variable, scales = "free") +  # Plot separate histograms for each variable
+  theme_minimal() +
+  labs(title = "Histograms of Predictor Variables")
+
+
+# Correlation matrix visualization using ggpairs()
+ggpairs(kole_predictors,
+        upper = list(continuous = wrap("cor", size = 4)),  # Display Pearson correlation values
+        lower = list(continuous = wrap("smooth", alpha = 0.5)), # Scatterplots with smoothing line
+        diag = list(continuous = wrap("densityDiag", alpha = 0.6))) # Density plots on diagonal
+```
+
+## **Task 2 ** 
+For each of the four predictors, make single-predictor models where the response variable is kole counts. Consider which of the predictors could be transformed to reduce skew along the x-axis. For educational purposes, start by using a poisson distribution for the counts.
+
+Quantify the degree of overdispersion in these models, and describe what it means. Based on likelihood ratio tests and effects plots, what are the relationships between kole and the four substrate types?
+```{r}
+# Check distribution of kole counts
+ggplot(kole, aes(x = count)) + 
+  geom_histogram(bins = 30, fill = "skyblue", color = "black") + 
+  theme_minimal() + 
+  labs(title = "Distribution of Kole Counts")
+
+# Apply transformations
+kole <- kole %>%
+  mutate(ta_log = log(ta + 1),  # Log transformation
+         sand_sqrt = sqrt(sand))  # Square root transformation
+
+# Poisson regression models for all 4 predictors
+model_ta <- glm(count ~ ta, data = kole, family = poisson)
+model_hard_coral <- glm(count ~ hard_coral, data = kole, family = poisson)
+model_sand <- glm(count ~ sand, data = kole, family = poisson)
+model_cca <- glm(count ~ cca, data = kole, family = poisson)
+
+# Summarizing models
+summary(model_ta)
+summary(model_hard_coral)
+summary(model_sand)
+summary(model_cca)
+
+# Checking for overdispersion!
+dispersion_test <- function(model) {
+  sum(residuals(model, type = "pearson")^2) / df.residual(model)
+}
+
+# Compute dispersion tests for models
+dispersion_test(model_ta)
+dispersion_test(model_hard_coral)
+dispersion_test(model_sand)
+dispersion_test(model_cca)
+
+```
+
+
+Our kole count distribution exhibited a right-skewed pattern, prompting the need to transform skewed predictors before further analysis. After transformation, a Poisson regression was conducted using Maximum Likelihood Estimation (MLE). The results indicated that hard coral (0.07) and CCA (0.13) were positively associated with kole counts, while TA (-0.02) and sand (-0.06) showed negative relationships, suggesting that kole prefer structured habitats over softer benthic environments. However, testing for overdispersion revealed that variance was nearly 30 times greater than expected under the Poisson model, making it an inadequate fit for the data. To address this issue, a Negative Binomial (NB) model was applied to all predictors, providing a more appropriate statistical approach to account for the observed overdispersion and improve model reliability.
+
+## **Task 3** 
+Now make new single-predictor models that account for overdispersion (we discussed two different ways to do this in lecture, you can do one or both).
+
+#Fitting a negative binomial to address the overdispersion
+```{r}
+# Fiting Negative Binomial model for all 4 parameters
+model_ta_nb <- glm.nb(count ~ ta, data = kole)
+model_hard_coral_nb <- glm.nb(count ~ hard_coral, data = kole)
+model_sand_nb <- glm.nb(count ~ sand, data = kole)
+model_cca_nb <- glm.nb(count ~ cca, data = kole)
+
+# Summarize models
+summary(model_ta_nb)
+summary(model_hard_coral_nb)
+summary(model_sand_nb)
+summary(model_cca_nb)
+```
+After fitting the Negative Binomial (NB) model to each of the single-predictor models, the results changed drastically, effectively addressing the overdispersion in the data and reducing unexplained variability. Since the Poisson model assumes variance equals the mean, the results initially showed that variance was 30 times higher than expected, making the model unsuitable. This was further confirmed by the NB model, where theta values (0.37 - 0.40) were much smaller, indicating that overdispersion was properly accounted for. While the relationship between kole presence and hard coral/CCA remained highly significant in both models, the NB model provided more accurate and reliable estimates compared to the Poisson model, reinforcing the necessity of using the NB approach for overdispersed count data.
+
+# Comparing models and using the liklihood ratio test
+```{r}
+
+AIC(model_ta, model_ta_nb, model_hard_coral, model_hard_coral_nb,
+    model_sand, model_sand_nb, model_cca, model_cca_nb)
+
+
+lrtest(model_ta, model_ta_nb)
+lrtest(model_hard_coral, model_hard_coral_nb)
+lrtest(model_sand, model_sand_nb)
+lrtest(model_cca, model_cca_nb)
+
+
+```
+These AIC values confirm that fitting the Negative Binomial model to address overdispersion was the appropriate choice, as the values are substantially lower and closer to 0, indicating a better model fit. This is further supported by the Likelihood Ratio Test (LRT), where all Negative Binomial models outperformed the Poisson models, showing much higher Log-Likelihood (LogLik) values. Additionally, the chi-squared test results demonstrate a significantly better fit for the Negative Binomial models, with p-values all < 2.2e-16, confirming that the Poisson model was inadequate due to extreme overdispersion.
+
+
+
+## **Task 4** 
+Although the single-predictor models are useful, we may get a more accurate picture of the role of each substrate type if we include all the substrate types in one model. Create such a model. Based on likelihood ratio tests and effects plots, how do the results change when all predictors are included simultaneously? Why do you think the results have changed?
+```{r}
+
+# Fitting the Negative Binomial model with all predictors!!
+allpredict_model_nb <- glm.nb(count ~ ta + hard_coral + sand + cca, data = kole)
+summary(allpredict_model_nb)
+
+# Comparing full model to single-predictor NB models
+lrtest(allpredict_model_nb, model_ta_nb)
+lrtest(allpredict_model_nb, model_hard_coral_nb)
+lrtest(allpredict_model_nb, model_sand_nb)
+lrtest(allpredict_model_nb, model_cca_nb)
+
+```
+
+When running all predictors within the same model, TA shifted from a negative to a positive correlation, likely due to confounding effects in the single-predictor models. Sand was no longer a significant predictor (p = 0.98), suggesting its previous effect was influenced by either hard coral or CCA rather than directly affecting kole abundance. Comparing model fits, results indicate that the multi-predictor model (AIC = 2025.7) provided a better fit than single-predictor models. Additionally, the log-likelihood improved from -1028.9 in the single-predictor CCA model to -1006.8 in the full model, further supporting the inclusion of multiple predictors.
+  In summary, the full model significantly improved overall fit (p < 0.05) in all cases, explaining more variance despite sand becoming an insignificant predictor. Incorporating multiple predictors reduced confounding effects and provided a more accurate representation of kole-substrate relationships.
+
+#Visualizing redisual plots
+```{r}
+plot(fitted(allpredict_model_nb), residuals(allpredict_model_nb), 
+     xlab = "Fitted Values", ylab = "Residuals",
+     main = "Residual vs. Fitted Values Plot")
+
+qqnorm(residuals(allpredict_model_nb))
+qqline(residuals(allpredict_model_nb))
+
+sum(residuals(allpredict_model_nb, type = "pearson")^2) / df.residual(allpredict_model_nb)
+
+
+```
+
+
+
+## **Task 5 ** 
+Finally, what are your overall conclusions about the substrate associations of kole,from this look at the data? Are there any additional analyses you would want to do that we have not done in this assignment? 
+
+Our analysis using Negative Binomial regression models revealed strong substrate associations for Ctenochaetus strigosus (kole), with crustose coralline algae (CCA) and hard coral being the most significant predictors of kole abundance (p < 0.001). CCA had the strongest positive effect, suggesting kole prefer areas with high CCA coverage, while hard coral also played an important role, likely providing grazing surfaces or shelter. Turf algae (TA) initially showed a negative effect, but after adjusting for other predictors, it became a significant positive predictor (p = 0.007), indicating its role is more context-dependent. Sand, which initially appeared to have a negative effect, lost significance in the multi-predictor model (p = 0.98), suggesting it does not directly influence kole abundance but may indicate a lack of suitable habitat. Model comparison (AIC & LRT) confirmed that single-predictor models overestimated some effects due to substrate correlations, and the multi-predictor model provided a more accurate ecological picture by accounting for the combined influence of multiple substrate types.
+
+While this study shows important insights into kole-substrate relationships, several additional questions and analyses could further refine our understanding which include whether or not  kole substrate associations are similar to other herbivorous fish (e.g., parrotfish, surgeonfish) and if juveniles vs. adults prefer different substrates?
